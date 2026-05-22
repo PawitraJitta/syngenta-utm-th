@@ -660,30 +660,7 @@
           </div>
           <div class="field">
             <label>Product <span class="opt">optional</span></label>
-            <div class="select-wrap">
-              <select id="product" onchange="buildUTM()">
-                <option value="">Select product...</option>
-                <optgroup label="Weed Control">
-                  <option value="gramoxone">Gramoxone</option>
-                  <option value="touchdown">Touchdown</option>
-                  <option value="dual_gold">Dual Gold</option>
-                </optgroup>
-                <optgroup label="Insect Control">
-                  <option value="karate">Karate</option>
-                  <option value="actara">Actara</option>
-                  <option value="chess">Chess</option>
-                </optgroup>
-                <optgroup label="Disease Control">
-                  <option value="score">Score</option>
-                  <option value="amistar">Amistar</option>
-                  <option value="revus">Revus</option>
-                </optgroup>
-                <optgroup label="Bio">
-                  <option value="taegro">Taegro</option>
-                  <option value="miravis">Miravis</option>
-                </optgroup>
-              </select>
-            </div>
+            <input type="text" id="product" placeholder="e.g. Gramoxone, Karate, Amistar" oninput="buildUTM()">
           </div>
           <div class="field span-2">
             <label>Crop <span class="opt">optional</span></label>
@@ -712,7 +689,23 @@
 
       <!-- Short URL -->
       <div style="margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.1);">
-        <div class="result-label">🔗 Short URL <span style="font-size:10px; font-weight:400; opacity:0.6; text-transform:none; letter-spacing:0;">(via TinyURL)</span></div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+          <div class="result-label" style="margin-bottom:0;">🔗 Short URL <span style="font-size:10px; font-weight:400; opacity:0.6; text-transform:none; letter-spacing:0;">(via Bitly)</span></div>
+          <button onclick="toggleBitlySettings()" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:white; border-radius:6px; padding:4px 10px; font-size:11px; cursor:pointer; font-family:'DM Sans',sans-serif;">⚙️ Token</button>
+        </div>
+
+        <!-- Bitly token input (hidden by default) -->
+        <div id="bitly-settings" style="display:none; margin-bottom:12px; background:rgba(0,0,0,0.2); border-radius:8px; padding:12px;">
+          <div style="font-size:11px; color:rgba(255,255,255,0.6); margin-bottom:6px;">Bitly Access Token (เก็บใน browser ของคุณเท่านั้น)</div>
+          <div style="display:flex; gap:8px;">
+            <input type="password" id="bitly-token-input" placeholder="Paste your Bitly token here..." 
+              style="flex:1; padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.08); color:white; font-size:13px; font-family:'DM Mono',monospace; outline:none;"
+              oninput="saveBitlyToken()">
+            <button onclick="clearBitlyToken()" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:white; border-radius:6px; padding:8px 12px; font-size:12px; cursor:pointer; font-family:'DM Sans',sans-serif; white-space:nowrap;">Clear</button>
+          </div>
+          <div id="token-status" style="font-size:11px; margin-top:6px; color:rgba(255,255,255,0.5);"></div>
+        </div>
+
         <div class="short-url-row">
           <div class="short-url-box empty" id="short-url-box">Short URL will appear here after generating</div>
           <div style="display:flex;flex-direction:column;gap:8px;">
@@ -824,6 +817,15 @@ function resetShortURL() {
 async function shortenURL() {
   if (!currentLongURL) return;
 
+  const token = localStorage.getItem('bitly_token') || '';
+  if (!token) {
+    // Show settings panel and prompt
+    document.getElementById('bitly-settings').style.display = 'block';
+    document.getElementById('bitly-token-input').focus();
+    showToast('⚙️ กรุณาใส่ Bitly Token ก่อนนะครับ');
+    return;
+  }
+
   const spinner = document.getElementById('shorten-spinner');
   const label = document.getElementById('shorten-label');
   const btn = document.getElementById('btn-shorten');
@@ -833,10 +835,20 @@ async function shortenURL() {
   btn.disabled = true;
 
   try {
-    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(currentLongURL)}`);
-    if (!res.ok) throw new Error('API failed');
-    const short = await res.text();
-    currentShortURL = short.trim();
+    const res = await fetch('https://api-ssl.bitly.com/v4/shorten', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ long_url: currentLongURL })
+    });
+
+    if (res.status === 401) throw new Error('invalid_token');
+    if (!res.ok) throw new Error('api_error');
+
+    const data = await res.json();
+    currentShortURL = data.link;
 
     const box = document.getElementById('short-url-box');
     box.textContent = currentShortURL;
@@ -844,17 +856,58 @@ async function shortenURL() {
     document.getElementById('btn-copy-short').disabled = false;
     showToast('✅ Short URL ready!');
   } catch (e) {
-    // Fallback: simulate with placeholder
-    currentShortURL = `https://tinyurl.com/syngenta-${Math.random().toString(36).substr(2, 6)}`;
-    const box = document.getElementById('short-url-box');
-    box.textContent = currentShortURL + ' (preview)';
-    box.className = 'short-url-box';
-    document.getElementById('btn-copy-short').disabled = false;
-    showToast('⚠️ Could not reach TinyURL — check connection');
+    if (e.message === 'invalid_token') {
+      showToast('❌ Token ไม่ถูกต้อง กรุณาตรวจสอบใหม่');
+      document.getElementById('bitly-settings').style.display = 'block';
+      document.getElementById('token-status').textContent = '❌ Token ไม่ถูกต้อง';
+      document.getElementById('token-status').style.color = '#FCA5A5';
+    } else {
+      showToast('⚠️ เชื่อมต่อ Bitly ไม่ได้ — ลองใหม่อีกครั้ง');
+    }
   } finally {
     spinner.classList.remove('show');
     label.textContent = '✂️ Shorten';
     btn.disabled = false;
+  }
+}
+
+function toggleBitlySettings() {
+  const panel = document.getElementById('bitly-settings');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  if (panel.style.display === 'block') {
+    const saved = localStorage.getItem('bitly_token') || '';
+    document.getElementById('bitly-token-input').value = saved;
+    updateTokenStatus();
+  }
+}
+
+function saveBitlyToken() {
+  const val = document.getElementById('bitly-token-input').value.trim();
+  if (val) {
+    localStorage.setItem('bitly_token', val);
+    updateTokenStatus();
+  } else {
+    localStorage.removeItem('bitly_token');
+    updateTokenStatus();
+  }
+}
+
+function clearBitlyToken() {
+  localStorage.removeItem('bitly_token');
+  document.getElementById('bitly-token-input').value = '';
+  updateTokenStatus();
+  showToast('🗑 Token cleared');
+}
+
+function updateTokenStatus() {
+  const saved = localStorage.getItem('bitly_token');
+  const el = document.getElementById('token-status');
+  if (saved) {
+    el.textContent = '✅ Token บันทึกแล้ว (เก็บใน browser ของคุณเท่านั้น)';
+    el.style.color = '#6EE7A0';
+  } else {
+    el.textContent = 'ยังไม่มี Token';
+    el.style.color = 'rgba(255,255,255,0.4)';
   }
 }
 
@@ -977,6 +1030,7 @@ function clearAll() {
   document.getElementById('sf-campaign').value = '';
   document.getElementById('utm-term').value = '';
   document.getElementById('product').value = '';
+  document.getElementById('bitly-settings').style.display = 'none';
   document.getElementById('crop').value = '';
   buildUTM();
 }
@@ -999,6 +1053,9 @@ function showToast(msg) {
 document.getElementById('btn-copy').disabled = true;
 document.getElementById('btn-shorten').disabled = true;
 renderHistory();
+// Load saved bitly token
+const _savedToken = localStorage.getItem('bitly_token');
+if (_savedToken) document.getElementById('bitly-token-input').value = _savedToken;
 </script>
 </body>
 </html>
